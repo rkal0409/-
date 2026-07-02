@@ -18,7 +18,7 @@ import sys
 import requests
 
 LOCATION = "37.6567,126.7367"  # 경기도 김포시 고촌읍 (위도,경도) - 날씨/자외선용
-AIRKOREA_STATION = "고촌"  # 에어코리아 공식 측정소명 - 미세먼지용
+AIRKOREA_STATION = "고촌읍"  # 에어코리아 공식 측정소명 - 미세먼지용
 
 def try_station_names(candidates: list[str], service_key: str) -> None:
     """이미 승인된 API로 후보 측정소명들을 하나씩 테스트해서 결과 출력 (진단용)."""
