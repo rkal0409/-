@@ -160,16 +160,18 @@ def build_news_section(client_id: str, client_secret: str) -> str:
 
 def send_telegram(text: str, bot_token: str, chat_id: str) -> None:
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    chat_ids = [c.strip() for c in chat_id.split(",") if c.strip()]
     # 텔레그램 메시지 길이 제한(4096자) 대비 분할 전송
     chunks = [text[i : i + 4000] for i in range(0, len(text), 4000)]
-    for chunk in chunks:
-        r = requests.post(
-            url,
-            data={"chat_id": chat_id, "text": chunk, "parse_mode": "Markdown"},
-            timeout=10,
-        )
-        if not r.ok:
-            print(f"[ERROR] 텔레그램 전송 실패: {r.text}", file=sys.stderr)
+    for cid in chat_ids:
+        for chunk in chunks:
+            r = requests.post(
+                url,
+                data={"chat_id": cid, "text": chunk, "parse_mode": "Markdown"},
+                timeout=10,
+            )
+            if not r.ok:
+                print(f"[ERROR] 텔레그램 전송 실패({cid}): {r.text}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
