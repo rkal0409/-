@@ -1,5 +1,6 @@
 """
 오늘/내일 날씨 예보(기온, 습도, 자외선지수, 미세먼지)를 텔레그램으로 보내는 스크립트.
+미세먼지는 정확도를 위해 에어코리아(환경부) 공식 측정소 데이터를 사용합니다.
 
 실행 방법:
   python weather.py today       -> 오늘 예보 (아침 7시용)
@@ -8,14 +9,16 @@
 필요한 환경변수 (GitHub Actions Secrets에 등록):
   TELEGRAM_BOT_TOKEN   - 텔레그램 봇 토큰
   TELEGRAM_CHAT_ID     - 메시지를 받을 채팅 ID
-  WEATHERAPI_KEY       - weatherapi.com 에서 발급받은 API 키
+  WEATHERAPI_KEY       - weatherapi.com 에서 발급받은 API 키 (날씨/자외선용)
+  DATA_GO_KR_KEY       - data.go.kr 에서 발급받은 에어코리아 API 인증키 (Decoding 키, 미세먼지용)
 """
 
 import os
 import sys
 import requests
 
-LOCATION = "37.6567,126.7367"  # 다른 지역으로 바꾸고 싶으면 여기만 수정 (예: "Busan", "Incheon")
+LOCATION = "37.6567,126.7367"  # 경기도 김포시 고촌읍 (위도,경도) - 날씨/자외선용
+AIRKOREA_STATION = "고촌"  # 에어코리아 공식 측정소명 - 미세먼지용
 
 
 def fetch_forecast(location: str, api_key: str) -> dict:
@@ -24,13 +27,41 @@ def fetch_forecast(location: str, api_key: str) -> dict:
         "key": api_key,
         "q": location,
         "days": 2,
-        "aqi": "yes",
+        "aqi": "no",
         "alerts": "no",
         "lang": "ko",
     }
     r = requests.get(url, params=params, timeout=10)
     r.raise_for_status()
     return r.json()
+
+
+def fetch_dust(station: str, service_key: str) -> dict | None:
+    """에어코리아 측정소별 실시간 미세먼지 데이터 조회."""
+    url = "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getMsrstnAcctoRltmMesureDnsty"
+    params = {
+        "serviceKey": service_key,
+        "returnType": "json",
+        "numOfRows": 1,
+        "pageNo": 1,
+        "stationName": station,
+        "dataTerm": "DAILY",
+        "ver": "1.3",
+    }
+    try:
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        items = r.json()["response"]["body"]["items"]
+        if not items:
+            return None
+        item = items[0]
+        return {
+            "pm10": item.get("pm10Value"),
+            "pm25": item.get("pm25Value"),
+        }
+    except Exception as e:
+        print(f"[WARN] 에어코리아 미세먼지 조회 실패: {e}", file=sys.stderr)
+        return None
 
 
 def pm_grade(value: float, thresholds: list[tuple[float, str]]) -> str:
@@ -57,10 +88,9 @@ def uv_grade(uv: float) -> str:
         return "위험"
 
 
-def build_today_message(data: dict) -> str:
+def build_today_message(data: dict, dust: dict | None) -> str:
     day = data["forecast"]["forecastday"][0]["day"]
     date = data["forecast"]["forecastday"][0]["date"]
-    aqi = day.get("air_quality", {})
 
     condition = day["condition"]["text"]
     max_temp = day["maxtemp_c"]
@@ -69,9 +99,6 @@ def build_today_message(data: dict) -> str:
     uv = day["uv"]
     rain_chance = day.get("daily_chance_of_rain", 0)
 
-    pm10 = aqi.get("pm10")
-    pm2_5 = aqi.get("pm2_5")
-
     lines = [f"☀️ *오늘({date}) 날씨 예보*", ""]
     lines.append(f"🌤️ {condition}")
     lines.append(f"🌡️ 최고 {max_temp}°C / 최저 {min_temp}°C")
@@ -79,10 +106,19 @@ def build_today_message(data: dict) -> str:
     lines.append(f"💧 습도 {humidity}%")
     lines.append(f"🔆 자외선지수 {uv} ({uv_grade(uv)})")
 
-    if pm10 is not None:
-        lines.append(f"🌫️ 미세먼지(PM10) {pm10:.0f} ({pm_grade(pm10, PM10_GRADES)})")
-    if pm2_5 is not None:
-        lines.append(f"🌫️ 초미세먼지(PM2.5) {pm2_5:.0f} ({pm_grade(pm2_5, PM25_GRADES)})")
+    if dust:
+        pm10_raw = dust.get("pm10")
+        pm25_raw = dust.get("pm25")
+        if pm10_raw and pm10_raw != "-":
+            pm10 = float(pm10_raw)
+            lines.append(f"🌫️ 미세먼지(PM10) {pm10:.0f} ({pm_grade(pm10, PM10_GRADES)})")
+        if pm25_raw and pm25_raw != "-":
+            pm25 = float(pm25_raw)
+            lines.append(f"🌫️ 초미세먼지(PM2.5) {pm25:.0f} ({pm_grade(pm25, PM25_GRADES)})")
+        if (not pm10_raw or pm10_raw == "-") and (not pm25_raw or pm25_raw == "-"):
+            lines.append("🌫️ 미세먼지: 측정소 자료 없음")
+    else:
+        lines.append("🌫️ 미세먼지: 조회 실패")
 
     return "\n".join(lines)
 
@@ -135,7 +171,9 @@ def main():
     data = fetch_forecast(LOCATION, api_key)
 
     if mode == "today":
-        message = build_today_message(data)
+        data_go_kr_key = os.environ["DATA_GO_KR_KEY"]
+        dust = fetch_dust(AIRKOREA_STATION, data_go_kr_key)
+        message = build_today_message(data, dust)
     else:
         message = build_tomorrow_message(data)
 
