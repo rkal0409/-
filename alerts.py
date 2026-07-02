@@ -104,15 +104,18 @@ def fetch_news(query: str, count: int, client_id: str, client_secret: str) -> li
 
 def send_telegram(text: str, bot_token: str, chat_id: str) -> bool:
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    r = requests.post(
-        url,
-        data={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
-        timeout=10,
-    )
-    if not r.ok:
-        print(f"[ERROR] 텔레그램 전송 실패: {r.text}", file=sys.stderr)
-        return False
-    return True
+    chat_ids = [c.strip() for c in chat_id.split(",") if c.strip()]
+    ok_all = True
+    for cid in chat_ids:
+        r = requests.post(
+            url,
+            data={"chat_id": cid, "text": text, "parse_mode": "Markdown"},
+            timeout=10,
+        )
+        if not r.ok:
+            print(f"[ERROR] 텔레그램 전송 실패({cid}): {r.text}", file=sys.stderr)
+            ok_all = False
+    return ok_all
 
 
 # ---------------------------------------------------------------------------
