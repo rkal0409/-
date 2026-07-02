@@ -1,6 +1,4 @@
 yfinance>=0.2.40
 requests>=2.31.0
 Plaintext
-yfinance
-requests
 holidays
