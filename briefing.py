@@ -1,13 +1,12 @@
 """
-매일 아침 국내 주식 브리핑을 생성해서 텔레그램으로 보내는 스크립트.
+매일 아침 미국 증시(나스닥/S&P500) 마감 기준 브리핑을 생성해서 텔레그램으로 보내는 스크립트.
+전일 미국장 지수, 관심 섹터(2차전지/반도체/바이오/원전/로봇) 등락률, 관련 뉴스를 담습니다.
 
 필요한 환경변수 (GitHub Actions Secrets에 등록):
   TELEGRAM_BOT_TOKEN   - 텔레그램 봇 토큰 (BotFather에서 발급)
   TELEGRAM_CHAT_ID     - 메시지를 받을 채팅 ID
   NAVER_CLIENT_ID      - 네이버 뉴스 검색 API 클라이언트 ID
   NAVER_CLIENT_SECRET  - 네이버 뉴스 검색 API 시크릿
-
-관심 종목은 아래 WATCHLIST 딕셔너리를 직접 수정하세요.
 """
 
 import os
@@ -21,23 +20,29 @@ import yfinance as yf
 # 설정: 여기를 취향에 맞게 수정하세요
 # ---------------------------------------------------------------------------
 
-# 지수 (yfinance 티커: 코스피=^KS11, 코스닥=^KQ11)
+# 미국 주요 지수
 INDEXES = {
-    "^KS11": "코스피",
-    "^KQ11": "코스닥",
+    "^IXIC": "나스닥종합지수",
+    "^GSPC": "S&P500",
 }
 
-# 관심 종목 (yfinance 티커. 코스피는 .KS, 코스닥은 .KQ 접미사)
-WATCHLIST = {
-    "005930.KS": "삼성전자",
-    "000660.KS": "SK하이닉스",
-    "035420.KS": "NAVER",
-    "005380.KS": "현대차",
+# 관심 섹터 (국내에 딱 맞는 공식 지수가 없어 대표 미국 상장 ETF로 대체)
+#   2차전지 = LIT (Global X Lithium & Battery Tech)
+#   반도체  = SOXX (iShares Semiconductor)
+#   바이오  = XBI (SPDR S&P Biotech)
+#   원전    = NLR (VanEck Uranium+Nuclear Energy)
+#   로봇    = BOTZ (Global X Robotics & AI)
+SECTORS = {
+    "LIT": "2차전지",
+    "SOXX": "반도체",
+    "XBI": "바이오",
+    "NLR": "원전",
+    "BOTZ": "로봇",
 }
 
-# 뉴스 검색 키워드 (종목별로 몇 건씩 가져올지)
-NEWS_PER_STOCK = 2
-NEWS_FOR_MARKET = 3  # "코스피", "미국 증시" 등 시장 전반 뉴스
+# 뉴스 검색 키워드 (몇 건씩 가져올지)
+NEWS_FOR_MARKET = 3       # "나스닥", "S&P500" 등 시장 전반 뉴스
+NEWS_PER_SECTOR = 2       # 섹터별 뉴스
 
 
 # ---------------------------------------------------------------------------
@@ -64,10 +69,8 @@ def fetch_price(ticker: str) -> dict | None:
         return None
 
 
-def build_price_section() -> str:
-    lines = []
-
-    lines.append("📊 *지수*")
+def build_index_section() -> str:
+    lines = ["📊 *전일 미국장 마감*"]
     for ticker, name in INDEXES.items():
         data = fetch_price(ticker)
         if data:
@@ -77,19 +80,29 @@ def build_price_section() -> str:
             )
         else:
             lines.append(f"⚠️ {name}: 조회 실패")
+    return "\n".join(lines)
 
-    lines.append("")
-    lines.append("💼 *관심 종목*")
-    for ticker, name in WATCHLIST.items():
+
+def build_sector_section() -> str:
+    """관심 섹터를 등락률 기준 상승 → 하락 순으로 정렬해서 보여줌."""
+    results = []
+    for ticker, name in SECTORS.items():
         data = fetch_price(ticker)
         if data:
+            results.append((name, data))
+        else:
+            results.append((name, None))
+
+    # 조회 성공한 것 먼저 등락률 내림차순 정렬, 실패한 건 맨 아래로
+    results.sort(key=lambda x: (x[1] is None, -(x[1]["pct"] if x[1] else 0)))
+
+    lines = ["🔥 *관심 섹터 (전일 등락률 순)*"]
+    for name, data in results:
+        if data:
             arrow = "🔺" if data["change"] >= 0 else "🔻"
-            lines.append(
-                f"{arrow} {name}: {data['price']:,}원 ({data['change']:+,}, {data['pct']:+.2f}%)"
-            )
+            lines.append(f"{arrow} {name}: {data['pct']:+.2f}%")
         else:
             lines.append(f"⚠️ {name}: 조회 실패")
-
     return "\n".join(lines)
 
 
@@ -125,17 +138,17 @@ def fetch_news(query: str, count: int, client_id: str, client_secret: str) -> li
 
 
 def build_news_section(client_id: str, client_secret: str) -> str:
-    lines = ["📰 *오늘의 뉴스*"]
+    lines = ["📰 *새벽~아침 참고 뉴스*"]
 
-    market_news = fetch_news("코스피 증시", NEWS_FOR_MARKET, client_id, client_secret)
+    market_news = fetch_news("미국증시 나스닥 S&P500", NEWS_FOR_MARKET, client_id, client_secret)
     for n in market_news:
         lines.append(f"• {n['title']}")
 
-    for ticker, name in WATCHLIST.items():
-        stock_news = fetch_news(name, NEWS_PER_STOCK, client_id, client_secret)
-        if stock_news:
+    for _, name in SECTORS.items():
+        sector_news = fetch_news(name, NEWS_PER_SECTOR, client_id, client_secret)
+        if sector_news:
             lines.append(f"\n_{name}_")
-            for n in stock_news:
+            for n in sector_news:
                 lines.append(f"• {n['title']}")
 
     return "\n".join(lines)
@@ -171,12 +184,14 @@ def main():
 
     today = datetime.now().strftime("%Y년 %m월 %d일 (%a)")
 
-    price_section = build_price_section()
+    index_section = build_index_section()
+    sector_section = build_sector_section()
     news_section = build_news_section(naver_id, naver_secret)
 
     message = (
-        f"☀️ *{today} 아침 증시 브리핑*\n\n"
-        f"{price_section}\n\n"
+        f"☀️ *{today} 아침 프리마켓 브리핑*\n\n"
+        f"{index_section}\n\n"
+        f"{sector_section}\n\n"
         f"{news_section}"
     )
 
