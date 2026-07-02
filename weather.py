@@ -20,18 +20,26 @@ import requests
 LOCATION = "37.6567,126.7367"  # 경기도 김포시 고촌읍 (위도,경도) - 날씨/자외선용
 AIRKOREA_STATION = "고촌"  # 에어코리아 공식 측정소명 - 미세먼지용
 
-def list_stations(addr: str, service_key: str) -> None:
-    """주소 키워드로 등록된 측정소 목록을 조회해서 출력 (진단용)."""
-    url = "http://apis.data.go.kr/B552584/MsrstnInfoInqireSvc/getMsrstnList"
-    params = {
-        "serviceKey": service_key,
-        "returnType": "json",
-        "numOfRows": 100,
-        "pageNo": 1,
-        "addr": addr,
-    }
-    r = requests.get(url, params=params, timeout=10)
-    print(r.text)
+def try_station_names(candidates: list[str], service_key: str) -> None:
+    """이미 승인된 API로 후보 측정소명들을 하나씩 테스트해서 결과 출력 (진단용)."""
+    url = "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getMsrstnAcctoRltmMesureDnsty"
+    for name in candidates:
+        params = {
+            "serviceKey": service_key,
+            "returnType": "json",
+            "numOfRows": 1,
+            "pageNo": 1,
+            "stationName": name,
+            "dataTerm": "DAILY",
+            "ver": "1.3",
+        }
+        try:
+            r = requests.get(url, params=params, timeout=10)
+            body = r.json()["response"]["body"]
+            count = body.get("totalCount", 0)
+            print(f"'{name}' -> totalCount={count}" + (f" / {body['items'][0]}" if count else ""))
+        except Exception as e:
+            print(f"'{name}' -> 오류: {e}")
 
 def fetch_forecast(location: str, api_key: str) -> dict:
     url = "http://api.weatherapi.com/v1/forecast.json"
@@ -183,7 +191,8 @@ def main():
 
     if mode == "stations":
         data_go_kr_key = os.environ["DATA_GO_KR_KEY"]
-        list_stations("김포", data_go_kr_key)
+        candidates = ["고촌", "고촌읍", "김포", "장기", "걸포", "사우", "풍무", "감정", "북변", "운양", "구래"]
+        try_station_names(candidates, data_go_kr_key)
         return
 
     api_key = os.environ["WEATHERAPI_KEY"]
