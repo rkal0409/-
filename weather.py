@@ -15,7 +15,7 @@ import os
 import sys
 import requests
 
-LOCATION = "Seoul"  # 다른 지역으로 바꾸고 싶으면 여기만 수정 (예: "Busan", "Incheon")
+LOCATION = "37.6567,126.7367"  # 다른 지역으로 바꾸고 싶으면 여기만 수정 (예: "Busan", "Incheon")
 
 
 def fetch_forecast(location: str, api_key: str) -> dict:
