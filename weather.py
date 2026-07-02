@@ -51,8 +51,10 @@ def fetch_dust(station: str, service_key: str) -> dict | None:
     try:
         r = requests.get(url, params=params, timeout=10)
         r.raise_for_status()
-        items = r.json()["response"]["body"]["items"]
+        body = r.json()["response"]["body"]
+        items = body["items"]
         if not items:
+            print(f"[DEBUG] 에어코리아 응답에 items 없음. 전체 응답: {r.text[:500]}", file=sys.stderr)
             return None
         item = items[0]
         return {
