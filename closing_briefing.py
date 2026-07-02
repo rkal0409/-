@@ -9,11 +9,20 @@ import requests
 import yfinance as yf
 
 # ---------------------------------------------------------------------------
-# 설정: 국내 주요 지수
+# 설정: 국내 주요 지수 및 관심 섹터
 # ---------------------------------------------------------------------------
 INDEXES = {
     "^KS11": "코스피 (KOSPI)",
     "^KQ11": "코스닥 (KOSDAQ)",
+}
+
+# 관심 섹터 (국내 대표 상장 ETF 기준)
+SECTORS = {
+    "305720.KS": "2차전지",  # KODEX 2차전지산업
+    "091160.KS": "반도체",   # KODEX 반도체
+    "229200.KS": "바이오",   # KODEX 바이오
+    "416060.KS": "원전",     # HANARO 원자력iSelect
+    "445680.KS": "로봇",     # KODEX K-로봇액티브
 }
 
 NEWS_FOR_MARKET = 5  # 마감 시황 뉴스 개수
@@ -52,6 +61,29 @@ def build_index_section() -> str:
             lines.append(f"⚠️ {name}: 조회 실패")
     return "\n".join(lines)
 
+def build_sector_section() -> str:
+    """관심 섹터를 등락률 기준 상승 → 하락 순으로 정렬해서 보여줌."""
+    results = []
+    for ticker, name in SECTORS.items():
+        data = fetch_price(ticker)
+        if data:
+            results.append((name, data))
+        else:
+            results.append((name, None))
+
+    # 조회 성공한 것 먼저 등락률 내림차순 정렬, 실패한 건 맨 아래로
+    results.sort(key=lambda x: (x[1] is None, -(x[1]["pct"] if x[1] else 0)))
+
+    lines = ["🔥 *관심 섹터 (오늘 마감 등락률 순)*"]
+    for name, data in results:
+        if data:
+            arrow = "🔺" if data["change"] >= 0 else "🔻"
+            lines.append(f"{arrow} {name}: {data['pct']:+.2f}%")
+        else:
+            lines.append(f"⚠️ {name}: 조회 실패")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # 2. 뉴스 가져오기 (네이버 뉴스 검색 API)
 # ---------------------------------------------------------------------------
@@ -61,7 +93,7 @@ def fetch_news(query: str, count: int, client_id: str, client_secret: str) -> li
         "X-Naver-Client-Id": client_id,
         "X-Naver-Client-Secret": client_secret,
     }
-    params = {"query": query, "display": count, "sort": "sim"} # 마감 뉴스는 관련도(sim)순이 유리함
+    params = {"query": query, "display": count, "sort": "sim"}
     try:
         r = requests.get(url, headers=headers, params=params, timeout=10)
         r.raise_for_status()
@@ -87,6 +119,7 @@ def build_news_section(client_id: str, client_secret: str) -> str:
     for n in market_news:
         lines.append(f"• {n['title']}")
     return "\n".join(lines)
+
 
 # ---------------------------------------------------------------------------
 # 3. 텔레그램 전송 및 메인
@@ -114,11 +147,13 @@ def main():
     today = datetime.now().strftime("%Y년 %m월 %d일")
 
     index_section = build_index_section()
+    sector_section = build_sector_section()
     news_section = build_news_section(naver_id, naver_secret)
 
     message = (
         f"🏁 *{today} 국내 증시 마감 브리핑*\n\n"
         f"{index_section}\n\n"
+        f"{sector_section}\n\n"
         f"{news_section}"
     )
 
