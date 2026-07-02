@@ -27,4 +27,4 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WEATHERAPI_KEY: ${{ secrets.WEATHERAPI_KEY }}
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
-        run: python weather.py stations
+        run: python weather.py today
