@@ -20,6 +20,18 @@ import requests
 LOCATION = "37.6567,126.7367"  # 경기도 김포시 고촌읍 (위도,경도) - 날씨/자외선용
 AIRKOREA_STATION = "고촌"  # 에어코리아 공식 측정소명 - 미세먼지용
 
+def list_stations(addr: str, service_key: str) -> None:
+    """주소 키워드로 등록된 측정소 목록을 조회해서 출력 (진단용)."""
+    url = "http://apis.data.go.kr/B552584/MsrstnInfoInqireSvc/getMsrstnList"
+    params = {
+        "serviceKey": service_key,
+        "returnType": "json",
+        "numOfRows": 100,
+        "pageNo": 1,
+        "addr": addr,
+    }
+    r = requests.get(url, params=params, timeout=10)
+    print(r.text)
 
 def fetch_forecast(location: str, api_key: str) -> dict:
     url = "http://api.weatherapi.com/v1/forecast.json"
@@ -160,16 +172,21 @@ def send_telegram(text: str, bot_token: str, chat_id: str) -> None:
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ("today", "tomorrow"):
-        print("사용법: python weather.py [today|tomorrow]", file=sys.stderr)
+    if len(sys.argv) < 2 or sys.argv[1] not in ("today", "tomorrow", "stations"):
+        print("사용법: python weather.py [today|tomorrow|stations]", file=sys.stderr)
         sys.exit(1)
 
     mode = sys.argv[1]
 
     bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
-    api_key = os.environ["WEATHERAPI_KEY"]
 
+    if mode == "stations":
+        data_go_kr_key = os.environ["DATA_GO_KR_KEY"]
+        list_stations("김포", data_go_kr_key)
+        return
+
+    api_key = os.environ["WEATHERAPI_KEY"]
     data = fetch_forecast(LOCATION, api_key)
 
     if mode == "today":
