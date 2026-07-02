@@ -41,7 +41,7 @@ def try_station_names(candidates: list[str], service_key: str) -> None:
         except Exception as e:
             print(f"'{name}' -> 오류: {e}")
 
-def outfit_advice(min_temp: float, max_temp: float, rain_chance: int, pm10_grade: str | None, pm25_grade: str | None) -> str:
+def outfit_advice(min_temp: float, max_temp: float, rain_detail: str | None, pm10_grade: str | None, pm25_grade: str | None) -> str:
     """평균기온 기준 옷차림 추천 (아이 기준, 어른 가이드보다 살짝 가볍게)."""
     avg_temp = (min_temp + max_temp) / 2
 
@@ -63,10 +63,8 @@ def outfit_advice(min_temp: float, max_temp: float, rain_chance: int, pm10_grade
         clothes = "패딩 + 내복(히트텍), 목도리·장갑·모자 풀장착"
 
     extras = []
-    if rain_chance >= 60:
-        extras.append("비 올 확률 높음 → 우산/우비, 여벌 양말 챙기기")
-    elif rain_chance >= 30:
-        extras.append("비 소식 있음 → 우산 하나 챙겨가기")
+    if rain_detail:
+        extras.append(f"{rain_detail} → 우산/우비, 여벌 양말 챙기기")
 
     bad_dust = pm10_grade in ("나쁨", "매우나쁨") or pm25_grade in ("나쁨", "매우나쁨")
     if bad_dust:
@@ -134,6 +132,25 @@ PM10_GRADES = [(30, "좋음"), (80, "보통"), (150, "나쁨"), (float("inf"), "
 PM25_GRADES = [(15, "좋음"), (35, "보통"), (75, "나쁨"), (float("inf"), "매우나쁨")]
 
 
+def build_rain_detail(hours: list[dict]) -> str | None:
+    """시간별 예보에서 비/소나기 시작 시각과 강수확률을 뽑아냄."""
+    rain_hours = [h for h in hours if h.get("chance_of_rain", 0) >= 30 or h.get("will_it_rain") == 1]
+    if not rain_hours:
+        return None
+
+    start_time = rain_hours[0]["time"].split(" ")[1]  # "HH:MM"
+    start_hour = int(start_time.split(":")[0])
+    max_chance = max(h.get("chance_of_rain", 0) for h in rain_hours)
+    is_shower = any("소나기" in h["condition"]["text"] for h in rain_hours)
+    rain_type = "소나기" if is_shower else "비"
+
+    period = "오전" if start_hour < 12 else "오후"
+    hour12 = start_hour if start_hour <= 12 else start_hour - 12
+    if hour12 == 0:
+        hour12 = 12
+
+    return f"{period} {hour12}시 이후 {rain_type} 소식 (강수확률 최대 {max_chance}%)"
+
 def uv_grade(uv: float) -> str:
     if uv < 3:
         return "낮음"
@@ -148,8 +165,10 @@ def uv_grade(uv: float) -> str:
 
 
 def build_today_message(data: dict, dust: dict | None) -> str:
-    day = data["forecast"]["forecastday"][0]["day"]
-    date = data["forecast"]["forecastday"][0]["date"]
+    forecastday = data["forecast"]["forecastday"][0]
+    day = forecastday["day"]
+    date = forecastday["date"]
+    hours = forecastday.get("hour", [])
 
     condition = day["condition"]["text"]
     max_temp = day["maxtemp_c"]
@@ -157,11 +176,12 @@ def build_today_message(data: dict, dust: dict | None) -> str:
     humidity = day["avghumidity"]
     uv = day["uv"]
     rain_chance = day.get("daily_chance_of_rain", 0)
+    rain_detail = build_rain_detail(hours)
 
     lines = [f"☀️ *오늘({date}) 날씨 예보*", ""]
     lines.append(f"🌤️ {condition}")
     lines.append(f"🌡️ 최고 {max_temp}°C / 최저 {min_temp}°C")
-    lines.append(f"☔ 강수확률 {rain_chance}%")
+    lines.append(f"☔ 강수확률 {rain_chance}%" + (f" — {rain_detail}" if rain_detail else ""))
     lines.append(f"💧 습도 {humidity}%")
     lines.append(f"🔆 자외선지수 {uv} ({uv_grade(uv)})")
 
@@ -185,7 +205,7 @@ def build_today_message(data: dict, dust: dict | None) -> str:
         lines.append("🌫️ 미세먼지: 조회 실패")
 
     lines.append("")
-    lines.append(outfit_advice(min_temp, max_temp, rain_chance, pm10_grade, pm25_grade))
+    lines.append(outfit_advice(min_temp, max_temp, rain_detail, pm10_grade, pm25_grade))
 
     return "\n".join(lines)
 
