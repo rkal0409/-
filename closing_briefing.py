@@ -5,8 +5,10 @@
 import os
 import sys
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import requests
 import yfinance as yf
+import holidays
 
 # ---------------------------------------------------------------------------
 # 설정: 국내 주요 지수 및 관심 섹터
@@ -16,16 +18,32 @@ INDEXES = {
     "^KQ11": "코스닥 (KOSDAQ)",
 }
 
-# 관심 섹터 (국내 대표 상장 ETF 기준)
+# 관심 섹터 (국내 대표 상장 ETF 및 대장주 기준)
 SECTORS = {
-    "305720.KS": "2차전지",  # KODEX 2차전지산업
-    "091160.KS": "반도체",   # KODEX 반도체
-    "229200.KS": "바이오",   # KODEX 바이오
-    "0091P0.KS": "원전",     # Tiger 코리아원자력
-    "445680.KS": "로봇",     # KODEX K-로봇액티브
+    "305720.KS": "2차전지",
+    "091160.KS": "반도체", 
+    "229200.KS": "바이오", 
+    "0091P0.KS": "원전",    
+    "445680.KS": "로봇",    
 }
 
-NEWS_FOR_MARKET = 5  # 마감 시황 뉴스 개수
+NEWS_FOR_MARKET = 5 
+
+def is_market_open() -> bool:
+    """오늘이 주말이거나 한국 공휴일인지 확인 (KST 기준)"""
+    # 깃허브 액션은 UTC 기준이므로 한국 시간(KST)으로 명확히 변환해서 체크
+    today_kst = datetime.now(ZoneInfo("Asia/Seoul")).date()
+    
+    # 1. 주말 체크 (5: 토요일, 6: 일요일)
+    if today_kst.weekday() >= 5:
+        return False
+        
+    # 2. 한국 공휴일 체크
+    kr_holidays = holidays.KR()
+    if today_kst in kr_holidays:
+        return False
+        
+    return True
 
 # ---------------------------------------------------------------------------
 # 1. 시세 가져오기
@@ -62,7 +80,6 @@ def build_index_section() -> str:
     return "\n".join(lines)
 
 def build_sector_section() -> str:
-    """관심 섹터를 등락률 기준 상승 → 하락 순으로 정렬해서 보여줌."""
     results = []
     for ticker, name in SECTORS.items():
         data = fetch_price(ticker)
@@ -71,7 +88,6 @@ def build_sector_section() -> str:
         else:
             results.append((name, None))
 
-    # 조회 성공한 것 먼저 등락률 내림차순 정렬, 실패한 건 맨 아래로
     results.sort(key=lambda x: (x[1] is None, -(x[1]["pct"] if x[1] else 0)))
 
     lines = ["🔥 *관심 섹터 (오늘 마감 등락률 순)*"]
@@ -82,7 +98,6 @@ def build_sector_section() -> str:
         else:
             lines.append(f"⚠️ {name}: 조회 실패")
     return "\n".join(lines)
-
 
 # ---------------------------------------------------------------------------
 # 2. 뉴스 가져오기 (네이버 뉴스 검색 API)
@@ -120,7 +135,6 @@ def build_news_section(client_id: str, client_secret: str) -> str:
         lines.append(f"• {n['title']}")
     return "\n".join(lines)
 
-
 # ---------------------------------------------------------------------------
 # 3. 텔레그램 전송 및 메인
 # ---------------------------------------------------------------------------
@@ -139,19 +153,25 @@ def send_telegram(text: str, bot_token: str, chat_id: str) -> None:
                 print(f"[ERROR] 텔레그램 전송 실패({cid}): {r.text}", file=sys.stderr)
 
 def main():
+    # 주말이거나 한국 공휴일이면 알림을 보내지 않고 스크립트 종료
+    if not is_market_open():
+        print("오늘은 주말 또는 한국 공휴일이므로 마감 브리핑을 발송하지 않습니다.")
+        return
+
     bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
     naver_id = os.environ["NAVER_CLIENT_ID"]
     naver_secret = os.environ["NAVER_CLIENT_SECRET"]
 
-    today = datetime.now().strftime("%Y년 %m월 %d일")
+    # 브리핑 제목에 들어갈 날짜도 한국 시간(KST)으로 맞춰줌
+    today_kst = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y년 %m월 %d일")
 
     index_section = build_index_section()
     sector_section = build_sector_section()
     news_section = build_news_section(naver_id, naver_secret)
 
     message = (
-        f"🏁 *{today} 국내 증시 마감 브리핑*\n\n"
+        f"🏁 *{today_kst} 국내 증시 마감 브리핑*\n\n"
         f"{index_section}\n\n"
         f"{sector_section}\n\n"
         f"{news_section}"
