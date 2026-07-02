@@ -41,6 +41,43 @@ def try_station_names(candidates: list[str], service_key: str) -> None:
         except Exception as e:
             print(f"'{name}' -> 오류: {e}")
 
+def outfit_advice(min_temp: float, max_temp: float, rain_chance: int, pm10_grade: str | None, pm25_grade: str | None) -> str:
+    """평균기온 기준 옷차림 추천 (아이 기준, 어른 가이드보다 살짝 가볍게)."""
+    avg_temp = (min_temp + max_temp) / 2
+
+    if avg_temp >= 28:
+        clothes = "민소매/반팔 + 반바지, 통풍 잘 되는 얇은 원단"
+    elif avg_temp >= 23:
+        clothes = "반팔 + 얇은 반바지 또는 면바지"
+    elif avg_temp >= 20:
+        clothes = "얇은 긴팔 + 바지, 아침저녁 쌀쌀하면 얇은 가디건 하나"
+    elif avg_temp >= 17:
+        clothes = "맨투맨/얇은 니트 + 바지, 겉에 걸칠 얇은 자켓 하나 챙기기"
+    elif avg_temp >= 12:
+        clothes = "니트/맨투맨 + 자켓 또는 얇은 점퍼"
+    elif avg_temp >= 9:
+        clothes = "도톰한 니트 + 점퍼, 목이 시릴 수 있어 목도리 하나"
+    elif avg_temp >= 5:
+        clothes = "기모 안감 옷 + 코트/두꺼운 점퍼, 장갑 챙기기"
+    else:
+        clothes = "패딩 + 내복(히트텍), 목도리·장갑·모자 풀장착"
+
+    extras = []
+    if rain_chance >= 60:
+        extras.append("비 올 확률 높음 → 우산/우비, 여벌 양말 챙기기")
+    elif rain_chance >= 30:
+        extras.append("비 소식 있음 → 우산 하나 챙겨가기")
+
+    bad_dust = pm10_grade in ("나쁨", "매우나쁨") or pm25_grade in ("나쁨", "매우나쁨")
+    if bad_dust:
+        extras.append("미세먼지 나쁨 → 마스크 챙기고 바깥놀이는 짧게")
+
+    lines = [f"👕 *오늘 옷차림 추천*: {clothes}"]
+    if extras:
+        lines.append("💡 " + " / ".join(extras))
+
+    return "\n".join(lines)
+
 def fetch_forecast(location: str, api_key: str) -> dict:
     url = "http://api.weatherapi.com/v1/forecast.json"
     params = {
@@ -128,19 +165,27 @@ def build_today_message(data: dict, dust: dict | None) -> str:
     lines.append(f"💧 습도 {humidity}%")
     lines.append(f"🔆 자외선지수 {uv} ({uv_grade(uv)})")
 
+    pm10_grade = None
+    pm25_grade = None
+
     if dust:
         pm10_raw = dust.get("pm10")
         pm25_raw = dust.get("pm25")
         if pm10_raw and pm10_raw != "-":
             pm10 = float(pm10_raw)
-            lines.append(f"🌫️ 미세먼지(PM10) {pm10:.0f} ({pm_grade(pm10, PM10_GRADES)})")
+            pm10_grade = pm_grade(pm10, PM10_GRADES)
+            lines.append(f"🌫️ 미세먼지(PM10) {pm10:.0f} ({pm10_grade})")
         if pm25_raw and pm25_raw != "-":
             pm25 = float(pm25_raw)
-            lines.append(f"🌫️ 초미세먼지(PM2.5) {pm25:.0f} ({pm_grade(pm25, PM25_GRADES)})")
+            pm25_grade = pm_grade(pm25, PM25_GRADES)
+            lines.append(f"🌫️ 초미세먼지(PM2.5) {pm25:.0f} ({pm25_grade})")
         if (not pm10_raw or pm10_raw == "-") and (not pm25_raw or pm25_raw == "-"):
             lines.append("🌫️ 미세먼지: 측정소 자료 없음")
     else:
         lines.append("🌫️ 미세먼지: 조회 실패")
+
+    lines.append("")
+    lines.append(outfit_advice(min_temp, max_temp, rain_chance, pm10_grade, pm25_grade))
 
     return "\n".join(lines)
 
