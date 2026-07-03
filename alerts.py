@@ -3,7 +3,7 @@
 2. 네이버 금융 실시간 속보 페이지 (웹 크롤링)
 두 가지를 모두 활용하여 관심 종목/섹터의 '속보' 및 '긴급' 기사만 텔레그램으로 발송합니다.
 """
-
+from __future__ import annotations
 import os
 import sys
 import json
