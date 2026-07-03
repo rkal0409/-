@@ -74,7 +74,7 @@ def build_index_section() -> str:
     for ticker, name in INDEXES.items():
         data = fetch_price(ticker)
         if data:
-            arrow = "🔺" if data["change"] >= 0 else "🔻"
+            arrow = "🔴" if data["change"] >= 0 else "🔵"
             lines.append(
                 f"{arrow} {name}: {data['price']:,} ({data['change']:+,}, {data['pct']:+.2f}%)"
             )
