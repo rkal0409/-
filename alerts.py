@@ -9,6 +9,7 @@ import sys
 import json
 import time
 import requests
+import html  # 특수문자 충돌 방지를 위해 추가
 from bs4 import BeautifulSoup
 
 SEEN_FILE = "seen_news.json"
@@ -68,7 +69,6 @@ def fetch_from_api(query: str, client_id: str, client_secret: str) -> list[dict]
             title = item["title"].replace("<b>", "").replace("</b>", "").replace("&quot;", '"').replace("&amp;", "&")
             link = item["link"]
             
-            # [핵심] 제목에 반드시 '속보'나 '긴급'이 포함되어야 통과
             if "속보" in title or "긴급" in title:
                 cleaned.append({"title": title, "link": link})
         return cleaned
@@ -110,7 +110,8 @@ def send_telegram(text: str, bot_token: str, chat_id: str) -> bool:
     chat_ids = [c.strip() for c in chat_id.split(",") if c.strip()]
     ok_all = True
     for cid in chat_ids:
-        r = requests.post(url, data={"chat_id": cid, "text": text, "parse_mode": "Markdown"}, timeout=10)
+        # 마크다운 충돌을 피하기 위해 HTML 모드로 변경
+        r = requests.post(url, data={"chat_id": cid, "text": text, "parse_mode": "HTML"}, timeout=10)
         if not r.ok:
             print(f"[ERROR] 텔레그램 전송 실패({cid}): {r.text}", file=sys.stderr)
             ok_all = False
@@ -130,22 +131,20 @@ def main():
     now = time.time()
     new_count = 0
 
-    # 기사 중복 수집 방지를 위한 딕셔너리 (URL 기준)
     collected_articles = {}
 
-    # 1. API를 통해 종목/섹터별 기사 수집 (매일경제 등 통합)
+    # 1. API를 통해 기사 수집
     for keyword in ALL_KEYWORDS:
         api_news = fetch_from_api(keyword, naver_id, naver_secret)
         for article in api_news:
             collected_articles[article["link"]] = {"title": article["title"], "keywords": [keyword]}
 
-    # 2. 네이버 금융 속보 크롤링 데이터 수집
+    # 2. 네이버 금융 속보 크롤링 수집
     finance_news = fetch_from_finance_board()
     for article in finance_news:
         title = article["title"]
         link = article["link"]
         
-        # 관심 키워드가 포함되어 있고, '속보'나 '긴급'이라는 단어가 있는지 검사
         matched_keywords = [kw for kw in ALL_KEYWORDS if kw in title]
         if matched_keywords and ("속보" in title or "긴급" in title):
             if link not in collected_articles:
@@ -164,7 +163,11 @@ def main():
             continue
             
         keyword_str = ", ".join(data["keywords"])
-        text = f"🚨 *[{keyword_str} 속보]* {data['title']}\n{link}"
+        # 기사 제목의 특수문자(<, >, & 등)를 HTML 안전 문자로 변환
+        safe_title = html.escape(data['title'])
+        
+        # Markdown 대신 HTML 태그(<b>) 사용
+        text = f"🚨 <b>[{keyword_str} 속보]</b> {safe_title}\n{link}"
         
         if send_telegram(text, bot_token, chat_id):
             new_count += 1
