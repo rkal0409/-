@@ -139,7 +139,7 @@ def fetch_news(query: str, count: int, client_id: str, client_secret: str) -> li
         "X-Naver-Client-Id": client_id,
         "X-Naver-Client-Secret": client_secret,
     }
-    params = {"query": query, "display": count, "sort": "sim"}
+    params = {"query": query, "display": count, "sort": "date"}
     try:
         r = requests.get(url, headers=headers, params=params, timeout=10)
         r.raise_for_status()
