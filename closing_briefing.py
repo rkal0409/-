@@ -4,11 +4,13 @@
 
 import os
 import sys
+import collections
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import requests
 import yfinance as yf
 import holidays
+from bs4 import BeautifulSoup
 
 # ---------------------------------------------------------------------------
 # 설정: 국내 주요 지수 및 관심 섹터
@@ -29,24 +31,39 @@ SECTORS = {
 
 NEWS_FOR_MARKET = 5 
 
+# 시총 상위 핵심 주도주 위주의 섹터 사전 (AI가 직접 매핑)
+STOCK_SECTOR_MAP = {
+    # 반도체
+    "삼성전자": "반도체", "SK하이닉스": "반도체", "한미반도체": "반도체", "하나마이크론": "반도체", "리노공업": "반도체", "HPSP": "반도체", "이수페타시스": "반도체", "DB하이텍": "반도체", "ISC": "반도체",
+    # 2차전지
+    "LG에너지솔루션": "2차전지", "삼성SDI": "2차전지", "포스코퓨처엠": "2차전지", "에코프로": "2차전지", "에코프로비엠": "2차전지", "엘엔에프": "2차전지", "금양": "2차전지", "POSCO홀딩스": "2차전지", "LG화학": "2차전지",
+    # 바이오/제약
+    "삼성바이오로직스": "바이오", "셀트리온": "바이오", "유한양행": "바이오", "알테오젠": "바이오", "HLB": "바이오", "케어젠": "바이오", "리가켐바이오": "바이오", "삼천당제약": "바이오", "휴젤": "바이오",
+    # 자동차/부품
+    "현대차": "자동차", "기아": "자동차", "현대모비스": "자동차", "HL만도": "자동차", "한온시스템": "자동차", "현대오토에버": "자동차",
+    # 원전/전력
+    "두산에너빌리티": "원전/전력", "HD현대일렉트릭": "원전/전력", "LS ELECTRIC": "원전/전력", "효성중공업": "원전/전력", "한국전력": "원전/전력", "일진전기": "원전/전력",
+    # 로봇
+    "두산로보틱스": "로봇", "레인보우로보틱스": "로봇", "엔젤로보틱스": "로봇",
+    # 플랫폼/게임
+    "NAVER": "IT/플랫폼", "카카오": "IT/플랫폼", "크래프톤": "IT/플랫폼", "엔씨소프트": "IT/플랫폼", "펄어비스": "IT/플랫폼",
+    # 금융
+    "KB금융": "금융", "신한지주": "금융", "하나금융지주": "금융", "메리츠금융지주": "금융", "우리금융지주": "금융", "삼성생명": "금융",
+    # 방산/조선
+    "한화에어로스페이스": "방산/조선", "LIG넥스원": "방산/조선", "현대로템": "방산/조선", "한국항공우주": "방산/조선", "HD한국조선해양": "방산/조선", "HD현대중공업": "방산/조선", "삼성중공업": "방산/조선", "한화오션": "방산/조선",
+}
+
 def is_market_open() -> bool:
-    """오늘이 주말이거나 한국 공휴일인지 확인 (KST 기준)"""
-    # 깃허브 액션은 UTC 기준이므로 한국 시간(KST)으로 명확히 변환해서 체크
     today_kst = datetime.now(ZoneInfo("Asia/Seoul")).date()
-    
-    # 1. 주말 체크 (5: 토요일, 6: 일요일)
     if today_kst.weekday() >= 5:
         return False
-        
-    # 2. 한국 공휴일 체크
     kr_holidays = holidays.KR()
     if today_kst in kr_holidays:
         return False
-        
     return True
 
 # ---------------------------------------------------------------------------
-# 1. 시세 가져오기
+# 1. 시세 및 섹터 가져오기
 # ---------------------------------------------------------------------------
 def fetch_price(ticker: str) -> dict | None:
     try:
@@ -72,9 +89,7 @@ def build_index_section() -> str:
         data = fetch_price(ticker)
         if data:
             arrow = "🔴" if data["change"] >= 0 else "🔵"
-            lines.append(
-                f"{arrow} {name}: {data['price']:,} ({data['change']:+,}, {data['pct']:+.2f}%)"
-            )
+            lines.append(f"{arrow} {name}: {data['price']:,} ({data['change']:+,}, {data['pct']:+.2f}%)")
         else:
             lines.append(f"⚠️ {name}: 조회 실패")
     return "\n".join(lines)
@@ -85,10 +100,7 @@ def build_sector_section() -> str:
         data = fetch_price(ticker)
         results.append((name, data))
 
-    # 상승, 하락, 실패 그룹으로 분류
-    rising = []
-    falling = []
-    failed = []
+    rising, falling, failed = [], [], []
 
     for name, data in results:
         if data is None:
@@ -98,14 +110,12 @@ def build_sector_section() -> str:
         else:
             falling.append((name, data))
 
-    # 상승은 가장 많이 오른 순서대로, 하락은 가장 많이 떨어진 순서대로 정렬
     rising.sort(key=lambda x: x[1]["pct"], reverse=True)
     falling.sort(key=lambda x: x[1]["pct"])
 
     lines = ["🔥 *관심 섹터*"]
-    lines.append("") # 섹터 제목 아래 빈 줄
+    lines.append("") 
 
-    # 상승 박스
     lines.append("📈 *[상승]*")
     if rising:
         for name, data in rising:
@@ -113,9 +123,8 @@ def build_sector_section() -> str:
     else:
         lines.append("> 상승 섹터 없음")
 
-    lines.append("") # 상승과 하락 사이 간격 띄우기
+    lines.append("") 
 
-    # 하락 박스
     lines.append("📉 *[하락]*")
     if falling:
         for name, data in falling:
@@ -123,7 +132,6 @@ def build_sector_section() -> str:
     else:
         lines.append("> 하락 섹터 없음")
 
-    # 조회 실패가 있을 경우 맨 아래에 추가
     if failed:
         lines.append("")
         lines.extend(failed)
@@ -131,7 +139,62 @@ def build_sector_section() -> str:
     return "\n".join(lines)
 
 # ---------------------------------------------------------------------------
-# 2. 뉴스 가져오기 (네이버 뉴스 검색 API)
+# 2. 외인/기관 수급 트렌드 분석 (네이버 금융 크롤링)
+# ---------------------------------------------------------------------------
+def extract_top_sectors_from_naver(url: str) -> tuple[str, str]:
+    """네이버 금융 페이지에서 매수/매도 종목을 추출하여 가장 많이 등장한 섹터를 반환"""
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.encoding = 'euc-kr'
+        soup = BeautifulSoup(r.text, 'html.parser')
+        
+        buy_sectors = []
+        sell_sectors = []
+        
+        for tr in soup.find_all('tr'):
+            links = tr.find_all('a', class_='tltle')
+            if len(links) == 4:
+                # Naver 4열 구조: 코스피 순매수(0), 코스피 순매도(1), 코스닥 순매수(2), 코스닥 순매도(3)
+                buy_sectors.append(STOCK_SECTOR_MAP.get(links[0].text.strip()))
+                sell_sectors.append(STOCK_SECTOR_MAP.get(links[1].text.strip()))
+                buy_sectors.append(STOCK_SECTOR_MAP.get(links[2].text.strip()))
+                sell_sectors.append(STOCK_SECTOR_MAP.get(links[3].text.strip()))
+            elif len(links) == 2:
+                buy_sectors.append(STOCK_SECTOR_MAP.get(links[0].text.strip()))
+                sell_sectors.append(STOCK_SECTOR_MAP.get(links[1].text.strip()))
+
+        # None(사전에 없는 종목) 제거
+        buy_sectors = [s for s in buy_sectors if s]
+        sell_sectors = [s for s in sell_sectors if s]
+        
+        # 가장 많이 등장한 섹터 2개씩 추출
+        top_buys = [item[0] for item in collections.Counter(buy_sectors).most_common(2)]
+        top_sells = [item[0] for item in collections.Counter(sell_sectors).most_common(2)]
+        
+        return (", ".join(top_buys) if top_buys else "혼조세", 
+                ", ".join(top_sells) if top_sells else "혼조세")
+    except Exception as e:
+        print(f"[WARN] 수급 트렌드 크롤링 실패: {e}", file=sys.stderr)
+        return ("조회 실패", "조회 실패")
+
+def build_investor_trend_section() -> str:
+    # 1. 외국인 순매수/순매도 페이지
+    foreigner_url = "https://finance.naver.com/sise/sise_deal_rank.naver"
+    f_buys, f_sells = extract_top_sectors_from_naver(foreigner_url)
+    
+    # 2. 기관 순매수/순매도 페이지
+    inst_url = "https://finance.naver.com/sise/sise_deal_rank.naver?investor_gubun=1000"
+    i_buys, i_sells = extract_top_sectors_from_naver(inst_url)
+    
+    lines = ["👥 *오늘의 주체별 수급 동향*"]
+    lines.append(f"• 👱‍♂️ *외국인*: [매수] {f_buys} / [매도] {f_sells}")
+    lines.append(f"• 🏢 *기 관*: [매수] {i_buys} / [매도] {i_sells}")
+    
+    return "\n".join(lines)
+
+# ---------------------------------------------------------------------------
+# 3. 뉴스 가져오기 (네이버 뉴스 API)
 # ---------------------------------------------------------------------------
 def fetch_news(query: str, count: int, client_id: str, client_secret: str) -> list[dict]:
     url = "https://openapi.naver.com/v1/search/news.json"
@@ -139,6 +202,7 @@ def fetch_news(query: str, count: int, client_id: str, client_secret: str) -> li
         "X-Naver-Client-Id": client_id,
         "X-Naver-Client-Secret": client_secret,
     }
+    # date(최신순)으로 고정하여 과거 자극적인 기사 방지
     params = {"query": query, "display": count, "sort": "date"}
     try:
         r = requests.get(url, headers=headers, params=params, timeout=10)
@@ -146,13 +210,7 @@ def fetch_news(query: str, count: int, client_id: str, client_secret: str) -> li
         items = r.json().get("items", [])
         cleaned = []
         for item in items:
-            title = (
-                item["title"]
-                .replace("<b>", "")
-                .replace("</b>", "")
-                .replace("&quot;", '"')
-                .replace("&amp;", "&")
-            )
+            title = item["title"].replace("<b>", "").replace("</b>", "").replace("&quot;", '"').replace("&amp;", "&")
             cleaned.append({"title": title, "link": item["link"]})
         return cleaned
     except Exception as e:
@@ -167,7 +225,7 @@ def build_news_section(client_id: str, client_secret: str) -> str:
     return "\n".join(lines)
 
 # ---------------------------------------------------------------------------
-# 3. 텔레그램 전송 및 메인
+# 4. 텔레그램 전송 및 메인
 # ---------------------------------------------------------------------------
 def send_telegram(text: str, bot_token: str, chat_id: str) -> None:
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -175,16 +233,11 @@ def send_telegram(text: str, bot_token: str, chat_id: str) -> None:
     chunks = [text[i : i + 4000] for i in range(0, len(text), 4000)]
     for cid in chat_ids:
         for chunk in chunks:
-            r = requests.post(
-                url,
-                data={"chat_id": cid, "text": chunk, "parse_mode": "Markdown"},
-                timeout=10,
-            )
+            r = requests.post(url, data={"chat_id": cid, "text": chunk, "parse_mode": "Markdown"}, timeout=10)
             if not r.ok:
                 print(f"[ERROR] 텔레그램 전송 실패({cid}): {r.text}", file=sys.stderr)
 
 def main():
-    # 주말이거나 한국 공휴일이면 알림을 보내지 않고 스크립트 종료
     if not is_market_open():
         print("오늘은 주말 또는 한국 공휴일이므로 마감 브리핑을 발송하지 않습니다.")
         return
@@ -194,16 +247,17 @@ def main():
     naver_id = os.environ["NAVER_CLIENT_ID"]
     naver_secret = os.environ["NAVER_CLIENT_SECRET"]
 
-    # 브리핑 제목에 들어갈 날짜도 한국 시간(KST)으로 맞춰줌
     today_kst = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y년 %m월 %d일")
 
     index_section = build_index_section()
     sector_section = build_sector_section()
+    trend_section = build_investor_trend_section()
     news_section = build_news_section(naver_id, naver_secret)
 
     message = (
         f"🏁 *{today_kst} 국내 증시 마감 브리핑*\n\n"
         f"{index_section}\n\n"
+        f"{trend_section}\n\n"
         f"{sector_section}\n\n"
         f"{news_section}"
     )
