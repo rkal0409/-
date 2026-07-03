@@ -93,7 +93,7 @@ def build_sector_section() -> str:
     lines = ["🔥 *관심 섹터 (오늘 마감 등락률 순)*"]
     for name, data in results:
         if data:
-            arrow = "🔺" if data["change"] >= 0 else "🔻"
+            arrow = "🔴" if data["change"] >= 0 else "🔵"
             lines.append(f"{arrow} {name}: {data['pct']:+.2f}%")
         else:
             lines.append(f"⚠️ {name}: 조회 실패")
