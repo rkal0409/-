@@ -1,4 +1,3 @@
-Plaintext
 yfinance
 requests
 holidays
