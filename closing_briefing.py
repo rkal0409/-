@@ -2,7 +2,7 @@
 매일 오후 한국 증시(코스피/코스닥) 마감 기준 브리핑을 생성해서 텔레그램으로 보내는 스크립트.
 토스증권 API를 활용하여 실시간 수급 동향을 파악합니다.
 """
-
+from __future__ import annotations
 import os
 import sys
 import collections
