@@ -8,7 +8,7 @@
   NAVER_CLIENT_ID      - 네이버 뉴스 검색 API 클라이언트 ID
   NAVER_CLIENT_SECRET  - 네이버 뉴스 검색 API 시크릿
 """
-
+from __future__ import annotations
 import os
 import sys
 from datetime import datetime
