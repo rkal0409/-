@@ -12,7 +12,7 @@
   WEATHERAPI_KEY       - weatherapi.com 에서 발급받은 API 키 (날씨/자외선용)
   DATA_GO_KR_KEY       - data.go.kr 에서 발급받은 에어코리아 API 인증키 (Decoding 키, 미세먼지용)
 """
-
+from __future__ import annotations
 import os
 import sys
 import requests
