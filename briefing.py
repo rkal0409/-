@@ -84,25 +84,54 @@ def build_index_section() -> str:
 
 
 def build_sector_section() -> str:
-    """관심 섹터를 등락률 기준 상승 → 하락 순으로 정렬해서 보여줌."""
     results = []
     for ticker, name in SECTORS.items():
         data = fetch_price(ticker)
-        if data:
-            results.append((name, data))
-        else:
-            results.append((name, None))
+        results.append((name, data))
 
-    # 조회 성공한 것 먼저 등락률 내림차순 정렬, 실패한 건 맨 아래로
-    results.sort(key=lambda x: (x[1] is None, -(x[1]["pct"] if x[1] else 0)))
+    # 상승, 하락, 실패 그룹으로 분류
+    rising = []
+    falling = []
+    failed = []
 
-    lines = ["🔥 *관심 섹터 (전일 등락률 순)*"]
     for name, data in results:
-        if data:
-            arrow = "🔴" if data["change"] >= 0 else "🔵"
-            lines.append(f"{arrow} {name}: {data['pct']:+.2f}%")
+        if data is None:
+            failed.append(f"⚠️ {name}: 조회 실패")
+        elif data["change"] >= 0:
+            rising.append((name, data))
         else:
-            lines.append(f"⚠️ {name}: 조회 실패")
+            falling.append((name, data))
+
+    # 상승은 가장 많이 오른 순서대로, 하락은 가장 많이 떨어진 순서대로 정렬
+    rising.sort(key=lambda x: x[1]["pct"], reverse=True)
+    falling.sort(key=lambda x: x[1]["pct"])
+
+    lines = ["🔥 *관심 섹터*"]
+    lines.append("") # 섹터 제목 아래 빈 줄
+
+    # 상승 박스
+    lines.append("📈 *[상승]*")
+    if rising:
+        for name, data in rising:
+            lines.append(f"> 🔴 {name}: {data['pct']:+.2f}%")
+    else:
+        lines.append("> 상승 섹터 없음")
+
+    lines.append("") # 상승과 하락 사이 간격 띄우기
+
+    # 하락 박스
+    lines.append("📉 *[하락]*")
+    if falling:
+        for name, data in falling:
+            lines.append(f"> 🔵 {name}: {data['pct']:+.2f}%")
+    else:
+        lines.append("> 하락 섹터 없음")
+
+    # 조회 실패가 있을 경우 맨 아래에 추가
+    if failed:
+        lines.append("")
+        lines.extend(failed)
+
     return "\n".join(lines)
 
 
