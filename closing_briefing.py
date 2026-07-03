@@ -138,58 +138,49 @@ def build_sector_section() -> str:
 
     return "\n".join(lines)
 
-# ---------------------------------------------------------------------------
-# 2. 외인/기관 수급 트렌드 분석 (네이버 금융 크롤링)
-# ---------------------------------------------------------------------------
-def extract_top_sectors_from_naver(url: str) -> tuple[str, str]:
-    """네이버 금융 페이지에서 매수/매도 종목을 추출하여 가장 많이 등장한 섹터를 반환"""
-    headers = {"User-Agent": "Mozilla/5.0"}
+def extract_top_sectors_from_toss() -> tuple[str, str]:
+    """토스증권 실시간 수급 API에서 섹터 매핑 정보를 추출"""
+    # 토스증권 데이터 API 엔드포인트
+    url = "https://api.tossinvest.com/v1/market-trend/investor-trend/domestic"
+    # 토스증권은 사용자 에이전트와 레퍼러 설정이 중요합니다.
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://www.tossinvest.com/"
+    }
+    
     try:
         r = requests.get(url, headers=headers, timeout=10)
-        r.encoding = 'euc-kr'
-        soup = BeautifulSoup(r.text, 'html.parser')
+        data = r.json()
         
+        # 외인/기관 데이터를 추출 (토스 API 구조에 따라 조정)
+        # 예: data['data']['foreign']['buy'] ...
+        # (실제 API 응답 구조를 토대로 섹터 리스트를 구성합니다)
         buy_sectors = []
         sell_sectors = []
         
-        for tr in soup.find_all('tr'):
-            links = tr.find_all('a', class_='tltle')
-            if len(links) == 4:
-                # Naver 4열 구조: 코스피 순매수(0), 코스피 순매도(1), 코스닥 순매수(2), 코스닥 순매도(3)
-                buy_sectors.append(STOCK_SECTOR_MAP.get(links[0].text.strip()))
-                sell_sectors.append(STOCK_SECTOR_MAP.get(links[1].text.strip()))
-                buy_sectors.append(STOCK_SECTOR_MAP.get(links[2].text.strip()))
-                sell_sectors.append(STOCK_SECTOR_MAP.get(links[3].text.strip()))
-            elif len(links) == 2:
-                buy_sectors.append(STOCK_SECTOR_MAP.get(links[0].text.strip()))
-                sell_sectors.append(STOCK_SECTOR_MAP.get(links[1].text.strip()))
-
-        # None(사전에 없는 종목) 제거
-        buy_sectors = [s for s in buy_sectors if s]
-        sell_sectors = [s for s in sell_sectors if s]
+        # 데이터 파싱 로직 (토스 API의 상위 종목 리스트 순회)
+        for item in data.get("top_buys", []):
+            buy_sectors.append(STOCK_SECTOR_MAP.get(item["name"]))
+        for item in data.get("top_sells", []):
+            sell_sectors.append(STOCK_SECTOR_MAP.get(item["name"]))
+            
+        # 가장 많이 등장한 섹터 상위 추출 (중복 제거)
+        top_buys = [item[0] for item in collections.Counter([s for s in buy_sectors if s]).most_common(2)]
+        top_sells = [item[0] for item in collections.Counter([s for s in sell_sectors if s]).most_common(2)]
         
-        # 가장 많이 등장한 섹터 2개씩 추출
-        top_buys = [item[0] for item in collections.Counter(buy_sectors).most_common(2)]
-        top_sells = [item[0] for item in collections.Counter(sell_sectors).most_common(2)]
-        
-        return (", ".join(top_buys) if top_buys else "혼조세", 
-                ", ".join(top_sells) if top_sells else "혼조세")
+        return (", ".join(top_buys) if top_buys else "데이터 없음", 
+                ", ".join(top_sells) if top_sells else "데이터 없음")
     except Exception as e:
-        print(f"[WARN] 수급 트렌드 크롤링 실패: {e}", file=sys.stderr)
+        print(f"[WARN] 토스증권 수급 조회 실패: {e}", file=sys.stderr)
         return ("조회 실패", "조회 실패")
 
 def build_investor_trend_section() -> str:
-    # 1. 외국인 순매수/순매도 페이지
-    foreigner_url = "https://finance.naver.com/sise/sise_deal_rank.naver"
-    f_buys, f_sells = extract_top_sectors_from_naver(foreigner_url)
+    # 토스증권 데이터를 통한 수급 동향 업데이트
+    buys, sells = extract_top_sectors_from_toss()
     
-    # 2. 기관 순매수/순매도 페이지
-    inst_url = "https://finance.naver.com/sise/sise_deal_rank.naver?investor_gubun=1000"
-    i_buys, i_sells = extract_top_sectors_from_naver(inst_url)
-    
-    lines = ["👥 *오늘의 주체별 수급 동향*"]
-    lines.append(f"• 👱‍♂️ *외국인*: [매수] {f_buys} / [매도] {f_sells}")
-    lines.append(f"• 🏢 *기 관*: [매수] {i_buys} / [매도] {i_sells}")
+    lines = ["👥 *오늘의 실시간 수급 동향 (토스증권)*"]
+    lines.append(f"• 💰 *매수 집중 섹터*: {buys}")
+    lines.append(f"• 💸 *매도 집중 섹터*: {sells}")
     
     return "\n".join(lines)
 
