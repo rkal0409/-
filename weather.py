@@ -87,7 +87,7 @@ def uv_grade(uv: float) -> str:
     else: return "위험"
 
 # ---------------------------------------------------------------------------
-# 🎀 Gemini AI 4세 전용 등원룩 스타일리스트 (에러 방어 및 검열 해제 적용)
+# 🎀 Gemini AI 4세 전용 등원룩 스타일리스트 (분량 및 완결성 제어)
 # ---------------------------------------------------------------------------
 def get_ai_outfit_advice(min_temp: float, max_temp: float, condition: str, rain_detail: str | None, pm10_grade: str | None, pm25_grade: str | None) -> str:
     gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -105,10 +105,10 @@ def get_ai_outfit_advice(min_temp: float, max_temp: float, condition: str, rain_
     - 미세먼지: {pm10_grade if pm10_grade else '보통'} / 초미세먼지: {pm25_grade if pm25_grade else '보통'}
 
     [스타일링 필수 고려사항]
-    1. 전체 내용은 중간에 절대 잘리지 않도록 완벽하게 끝맺음을 맺으세요.
-    2. 4살 어린이집 맞춤형: 아이가 활동하기 편한 소재(면, 쭈리 등)여야 하며, 실내외 온도차에 대비해 입고 벗기 편한 레이어드(겹쳐입기) 전략을 꼭 써주세요.
-    3. 구체적인 룩북 묘사: 사진이 없어도 눈에 그려지도록 상의, 하의, 아우터, 신발, 포인트 액세서리(양말, 헤어핀)의 색상과 재질을 상세하게 묘사해주세요.
-    4. 마크다운 기호(*, _)는 빼고 귀여운 이모지들을 섞어서 다정하고 읽기 편한 문체로 15~20줄 분량으로 넉넉하고 예쁘게 작성해주세요.
+    1. 분량 압축 및 완결성: 글이 너무 길어지면 텔레그램 전송 중 강제로 잘리게 됩니다. 투머치토커가 되지 않도록 불필요한 서론은 줄이고, 핵심 코디 내용만 10~12줄 내외로 컴팩트하게 담아 반드시 문장을 완벽하게 끝맺으세요.
+    2. 4살 어린이집 맞춤형: 활동하기 편한 소재여야 하며, 실내외 온도차에 대비해 입고 벗기 편한 레이어드(겹쳐입기) 전략을 써주세요.
+    3. 구체적인 룩북 묘사: 상의, 하의, 아우터, 신발, 액세서리의 색상과 재질을 눈에 그려지듯 묘사하되, 늘어지지 않게 템포를 조절하세요.
+    4. 마크다운 기호(*, _, [, ])는 모두 빼고 귀여운 이모지들을 섞어서 다정하고 읽기 편한 문체로 작성해주세요.
     """
 
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={gemini_key}"
@@ -118,9 +118,7 @@ def get_ai_outfit_advice(min_temp: float, max_temp: float, condition: str, rain_
         try:
             r = requests.post(url, headers={"Content-Type": "application/json"}, json={
                 "contents": [{"parts": [{"text": prompt}]}],
-                # 🚨 답변이 잘리지 않도록 800 -> 2000으로 대폭 상향
-                "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2000},
-                # 🚨 아동 옷차림 묘사 시 구글 안전 필터에 걸리지 않도록 4개 항목 모두 100% 검열 해제
+                "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2500},
                 "safetySettings": [
                     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
                     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -140,7 +138,6 @@ def get_ai_outfit_advice(min_temp: float, max_temp: float, condition: str, rain_
             candidate = data["candidates"][0]
             text = candidate["content"]["parts"][0]["text"].strip()
             
-            # 🚨 왜 답변이 잘렸는지 알려주는 추적기 탑재
             finish_reason = candidate.get("finishReason", "")
             if finish_reason == "SAFETY":
                 text += "\n\n(⚠️ 구글 AI 알림: 아동 관련 단어로 인해 안전 검열 필터가 작동하여 답변이 강제 중단되었습니다.)"
@@ -219,7 +216,6 @@ def build_tomorrow_message(data: dict) -> str:
 def send_telegram(text: str, bot_token: str, chat_id: str) -> None:
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     
-    # 텔레그램 4000자 제한을 넘길 경우 문단 단위로 스마트하게 쪼개서 전송
     chunks = []
     while len(text) > 4000:
         split_idx = text.rfind("\n\n", 0, 4000)
