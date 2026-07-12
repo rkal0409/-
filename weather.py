@@ -14,7 +14,7 @@ LOCATION = "37.6567,126.7367"  # 경기도 김포시 고촌읍 (위도,경도) -
 AIRKOREA_STATION = "고촌읍"  # 에어코리아 공식 측정소명 - 미세먼지용
 
 # ---------------------------------------------------------------------------
-# 에어코리아 미세먼지 측정소 진단 (유지)
+# 에어코리아 미세먼지 측정소 진단
 # ---------------------------------------------------------------------------
 def try_station_names(candidates: list[str], service_key: str) -> None:
     url = "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getMsrstnAcctoRltmMesureDnsty"
@@ -87,7 +87,7 @@ def uv_grade(uv: float) -> str:
     else: return "위험"
 
 # ---------------------------------------------------------------------------
-# 🎀 Gemini AI 4세 전용 등원룩 스타일리스트
+# 🎀 Gemini AI 4세 전용 등원룩 스타일리스트 (에러 방어 및 검열 해제 적용)
 # ---------------------------------------------------------------------------
 def get_ai_outfit_advice(min_temp: float, max_temp: float, condition: str, rain_detail: str | None, pm10_grade: str | None, pm25_grade: str | None) -> str:
     gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -105,12 +105,10 @@ def get_ai_outfit_advice(min_temp: float, max_temp: float, condition: str, rain_
     - 미세먼지: {pm10_grade if pm10_grade else '보통'} / 초미세먼지: {pm25_grade if pm25_grade else '보통'}
 
     [스타일링 필수 고려사항]
-    1. 4살 어린이집 맞춤형: 아이가 활동하기 편한 소재(면, 쭈리 등)여야 하며, 실내 활동과 낮잠 시간에 덥거나 불편하지 않도록 입고 벗기 편한 겹쳐 입기(레이어드) 전략을 꼭 써주세요.
-    2. 날씨 맞춤형: 비가 오면 귀여운 장화나 우비 색상 매치, 미세먼지가 나쁘면 마스크 챙기기, 자외선이 강하면 챙이 있는 모자 등을 챙겨주세요.
-    3. 구체적인 룩북 묘사: 사진이 없어도 눈에 그려지도록 상의, 하의, 아우터, 신발, 포인트 액세서리(양말, 헤어핀)의 색상과 재질을 사랑스럽게 묘사해주세요.
-
-    출력 형식:
-    (마크다운 기호 없이, 귀여운 이모지들을 섞어서 다정하고 읽기 편한 문체로 10~15줄 정도로 작성해주세요.)
+    1. 전체 내용은 중간에 절대 잘리지 않도록 완벽하게 끝맺음을 맺으세요.
+    2. 4살 어린이집 맞춤형: 아이가 활동하기 편한 소재(면, 쭈리 등)여야 하며, 실내외 온도차에 대비해 입고 벗기 편한 레이어드(겹쳐입기) 전략을 꼭 써주세요.
+    3. 구체적인 룩북 묘사: 사진이 없어도 눈에 그려지도록 상의, 하의, 아우터, 신발, 포인트 액세서리(양말, 헤어핀)의 색상과 재질을 상세하게 묘사해주세요.
+    4. 마크다운 기호(*, _)는 빼고 귀여운 이모지들을 섞어서 다정하고 읽기 편한 문체로 15~20줄 분량으로 넉넉하고 예쁘게 작성해주세요.
     """
 
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={gemini_key}"
@@ -120,25 +118,42 @@ def get_ai_outfit_advice(min_temp: float, max_temp: float, condition: str, rain_
         try:
             r = requests.post(url, headers={"Content-Type": "application/json"}, json={
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.7, "maxOutputTokens": 800},
+                # 🚨 답변이 잘리지 않도록 800 -> 2000으로 대폭 상향
+                "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2000},
+                # 🚨 아동 옷차림 묘사 시 구글 안전 필터에 걸리지 않도록 4개 항목 모두 100% 검열 해제
                 "safetySettings": [
                     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"}
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
                 ]
-            }, timeout=30)
-            
-            if r.ok:
-                data = r.json()
-                text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                text = text.replace("**", "").replace("##", "").replace("#", "").replace("* ", "• ").replace("`", "'")
-                return html.escape(text)
+            }, timeout=40)
             
             if r.status_code in [500, 502, 503, 504]:
-                time.sleep(2)
+                time.sleep(2 * attempt)
                 continue
                 
+            if not r.ok:
+                return f"👗 (AI 코디 봇: 구글 서버 응답 거절 - 코드 {r.status_code})"
+                
+            data = r.json()
+            candidate = data["candidates"][0]
+            text = candidate["content"]["parts"][0]["text"].strip()
+            
+            # 🚨 왜 답변이 잘렸는지 알려주는 추적기 탑재
+            finish_reason = candidate.get("finishReason", "")
+            if finish_reason == "SAFETY":
+                text += "\n\n(⚠️ 구글 AI 알림: 아동 관련 단어로 인해 안전 검열 필터가 작동하여 답변이 강제 중단되었습니다.)"
+            elif finish_reason == "MAX_TOKENS":
+                text += "\n\n(⚠️ 구글 AI 알림: 답변이 너무 길어 최대 글자 수 제한으로 강제 절단되었습니다.)"
+                
+            text = text.replace("**", "").replace("##", "").replace("#", "").replace("* ", "• ").replace("`", "'")
+            return html.escape(text)
+            
+        except requests.exceptions.Timeout:
+            time.sleep(2 * attempt)
         except Exception:
-            time.sleep(2)
+            return "👗 (AI 코디 봇: 코드를 실행하는 중 오류가 발생했습니다.)"
             
     return "👗 (AI 코디 봇: 현재 구글 서버가 바빠 코디를 불러오지 못했어요. 오늘은 겹쳐 입는 옷을 추천해요!)"
 
@@ -159,7 +174,7 @@ def build_today_message(data: dict, dust: dict | None) -> str:
     rain_chance = day.get("daily_chance_of_rain", 0)
     rain_detail = build_rain_detail(hours)
 
-    lines = [f"☀️ *오늘({date}) 날씨 예보*", ""]
+    lines = [f"☀️ <b>오늘({date}) 날씨 예보</b>", ""]
     lines.append(f"🌤️ {condition}")
     lines.append(f"🌡️ 최고 {max_temp}°C / 최저 {min_temp}°C")
     lines.append(f"☔ 강수확률 {rain_chance}%" + (f" — {rain_detail}" if rain_detail else ""))
@@ -178,7 +193,6 @@ def build_today_message(data: dict, dust: dict | None) -> str:
     else:
         lines.append("🌫️ 미세먼지: 조회 실패")
 
-    # 🎀 AI 코디네이터 호출 및 추가
     ai_advice = get_ai_outfit_advice(min_temp, max_temp, condition, rain_detail, pm10_grade, pm25_grade)
     
     lines.append("")
@@ -193,7 +207,7 @@ def build_tomorrow_message(data: dict) -> str:
     day = forecastdays[1]["day"]
     date = forecastdays[1]["date"]
     
-    lines = [f"🌙 *내일({date}) 날씨 예보*", ""]
+    lines = [f"🌙 <b>내일({date}) 날씨 예보</b>", ""]
     lines.append(f"🌤️ {day['condition']['text']}")
     lines.append(f"🌡️ 최고 {day['maxtemp_c']}°C / 최저 {day['mintemp_c']}°C")
     lines.append(f"☔ 강수확률 {day.get('daily_chance_of_rain', 0)}%")
@@ -204,11 +218,23 @@ def build_tomorrow_message(data: dict) -> str:
 # ---------------------------------------------------------------------------
 def send_telegram(text: str, bot_token: str, chat_id: str) -> None:
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    
+    # 텔레그램 4000자 제한을 넘길 경우 문단 단위로 스마트하게 쪼개서 전송
+    chunks = []
+    while len(text) > 4000:
+        split_idx = text.rfind("\n\n", 0, 4000)
+        if split_idx == -1: split_idx = 4000
+        chunks.append(text[:split_idx])
+        text = text[split_idx:]
+    chunks.append(text)
+
     for cid in [c.strip() for c in chat_id.split(",") if c.strip()]:
-        # HTML 파싱 모드로 변경 (마크다운 에러 원천 차단)
-        r = requests.post(url, json={"chat_id": cid, "text": text, "parse_mode": "HTML"}, timeout=10)
-        if not r.ok:
-            print(f"[ERROR] 텔레그램 전송 실패({cid}): {r.text}", file=sys.stderr)
+        for chunk in chunks:
+            try:
+                r = requests.post(url, json={"chat_id": cid, "text": chunk, "parse_mode": "HTML"}, timeout=10)
+                if not r.ok: print(f"[🔴 텔레그램 발송 실패] 방({cid}): {r.text}", file=sys.stderr)
+            except Exception as e:
+                print(f"[🔴 텔레그램 에러]: {e}", file=sys.stderr)
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("today", "tomorrow", "stations"):
